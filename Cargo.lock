@@ -4755,6 +4755,7 @@ dependencies = [
  "serde_json",
  "slotmap",
  "smallvec",
+ "smithay-client-toolkit",
  "smol",
  "sum_tree",
  "taffy",
@@ -9317,12 +9318,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922fd3eeab3bd820d76537ce8f582b1cf951eceb5475c28500c7457d9d17f53a"
 dependencies = [
  "bitflags 2.4.2",
+ "bytemuck",
  "calloop",
  "calloop-wayland-source",
  "cursor-icon",
  "libc",
  "log",
  "memmap2 0.9.4",
+ "pkg-config",
  "rustix 0.38.32",
  "thiserror",
  "wayland-backend",
@@ -9332,6 +9335,7 @@ dependencies = [
  "wayland-protocols",
  "wayland-protocols-wlr",
  "wayland-scanner",
+ "xkbcommon",
  "xkeysym",
 ]
 
@@ -12872,6 +12876,9 @@ name = "xkeysym"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "054a8e68b76250b253f671d1268cb7f1ae089ec35e195b2efb2a4e9a836d0621"
+dependencies = [
+ "bytemuck",
+]
 
 [[package]]
 name = "xmlparser"

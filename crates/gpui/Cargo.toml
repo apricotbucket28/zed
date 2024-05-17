@@ -12,7 +12,12 @@ workspace = true
 
 [features]
 default = []
-test-support = ["backtrace", "collections/test-support", "util/test-support", "http/test-support"]
+test-support = [
+    "backtrace",
+    "collections/test-support",
+    "util/test-support",
+    "http/test-support",
+]
 runtime_shaders = []
 macos-blade = ["blade-graphics", "blade-macros", "bytemuck"]
 
@@ -105,6 +110,7 @@ as-raw-xcb-connection = "1"
 ashpd = "0.8.0"
 calloop = "0.12.4"
 calloop-wayland-source = "0.2.0"
+smithay-client-toolkit = "0.18.1"
 wayland-backend = { version = "0.3.3", features = ["client_system"] }
 wayland-client = { version = "0.31.2" }
 wayland-cursor = "0.31.1"
@@ -126,7 +132,10 @@ x11rb = { version = "0.13.0", features = [
     "resource_manager",
 ] }
 xkbcommon = { version = "0.7", features = ["wayland", "x11"] }
-xim = { git = "https://github.com/npmania/xim-rs", rev = "27132caffc5b9bc9c432ca4afad184ab6e7c16af", features = ["x11rb-xcb", "x11rb-client"] }
+xim = { git = "https://github.com/npmania/xim-rs", rev = "27132caffc5b9bc9c432ca4afad184ab6e7c16af", features = [
+    "x11rb-xcb",
+    "x11rb-client",
+] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true

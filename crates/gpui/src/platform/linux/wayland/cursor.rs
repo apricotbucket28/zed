@@ -21,8 +21,8 @@ impl Drop for Cursor {
 impl Cursor {
     pub fn new(connection: &Connection, globals: &Globals, size: u32) -> Self {
         Self {
-            theme: CursorTheme::load(&connection, globals.shm.clone(), size).log_err(),
-            surface: globals.compositor.create_surface(&globals.qh, ()),
+            theme: CursorTheme::load(&connection, globals.shm.wl_shm().clone(), size).log_err(),
+            surface: globals.compositor.create_surface(&globals.qh),
         }
     }
 
