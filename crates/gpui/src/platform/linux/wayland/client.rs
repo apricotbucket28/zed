@@ -31,6 +31,7 @@ use smithay_client_toolkit::{
 };
 use util::ResultExt;
 use wayland_backend::client::ObjectId;
+use wayland_client::Proxy;
 use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
@@ -60,6 +61,8 @@ pub(crate) struct WaylandClientState {
     serial_tracker: SerialTracker,
     globals: Globals,
     windows: HashMap<ObjectId, WaylandWindowStatePtr>,
+    keyboard: Option<wl_keyboard::WlKeyboard>,
+    pointer: Option<wl_pointer::WlPointer>,
     common: LinuxCommon,
     conn: Connection,
     loop_handle: LoopHandle<'static, WaylandClientState>,
@@ -165,8 +168,6 @@ impl WaylandClient {
 
         let display = conn.backend().display_ptr() as *mut std::ffi::c_void;
 
-        let event_loop = EventLoop::<WaylandClientState>::try_new().unwrap();
-
         let (common, main_receiver) = LinuxCommon::new(event_loop.get_signal());
 
         let handle = event_loop.handle();
@@ -197,6 +198,8 @@ impl WaylandClient {
             globals,
             // TODO: output_scales
             windows: HashMap::default(),
+            keyboard: None,
+            pointer: None,
             common,
             conn,
             loop_handle: handle.clone(),
@@ -227,6 +230,7 @@ impl LinuxClient for WaylandClient {
     ) -> Box<dyn PlatformWindow> {
         let mut state = self.0.borrow_mut();
 
+        println!("creating window");
         let (window, surface_id) = WaylandWindow::new(
             &state.globals,
             state.conn.backend().display_ptr().cast::<c_void>(),
@@ -293,6 +297,7 @@ impl LinuxClient for WaylandClient {
             .take()
             .expect("App is already running");
 
+        println!("running event loop");
         event_loop
             .run(
                 None,
@@ -380,7 +385,9 @@ impl CompositorHandler for WaylandClientState {
         _surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        self.draw(conn, qh);
+        // TODO
+        println!("frame");
+        // self.draw(conn, qh);
     }
 }
 
@@ -417,13 +424,15 @@ impl OutputHandler for WaylandClientState {
 impl WindowHandler for WaylandClientState {
     fn request_close(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &Window) {
         // self.exit = true;
+        println!("request close");
+        self.common.signal.stop();
     }
 
     fn configure(
         &mut self,
         conn: &Connection,
         qh: &QueueHandle<Self>,
-        _window: &Window,
+        window: &Window,
         configure: WindowConfigure,
         _serial: u32,
     ) {
@@ -432,11 +441,13 @@ impl WindowHandler for WaylandClientState {
         // self.width = configure.new_size.0.map(|v| v.get()).unwrap_or(256);
         // self.height = configure.new_size.1.map(|v| v.get()).unwrap_or(256);
 
-        // // Initiate the first draw.
-        // if self.first_configure {
-        //     self.first_configure = false;
-        //     self.draw(conn, qh);
+        let window_state = self.windows.get(&window.wl_surface().id()).unwrap();
+        // Initiate the first draw.
+        // if window_state.first_configure {
+        //     window_state.first_configure = false;
+        //     window_state.draw(conn, qh);
         // }
+        window_state.frame(true);
     }
 }
 
@@ -456,7 +467,9 @@ impl SeatHandler for WaylandClientState {
         &mut self.globals.seat_state
     }
 
-    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {
+        println!("new seat");
+    }
 
     fn new_capability(
         &mut self,
@@ -465,33 +478,34 @@ impl SeatHandler for WaylandClientState {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        // if capability == Capability::Keyboard && self.keyboard.is_none() {
-        //     println!("Set keyboard capability");
-        //     let keyboard = self
-        //         .globals
-        //         .seat_state
-        //         .get_keyboard_with_repeat(
-        //             qh,
-        //             &seat,
-        //             None,
-        //             state.loop_handle.clone(),
-        //             Box::new(|_state, _wl_kbd, event| {
-        //                 println!("Repeat: {:?} ", event);
-        //             }),
-        //         )
-        //         .expect("Failed to create keyboard");
+        if capability == Capability::Keyboard && self.keyboard.is_none() {
+            println!("Set keyboard capability");
+            let keyboard = self
+                .globals
+                .seat_state
+                .get_keyboard_with_repeat(
+                    qh,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(|_state, _wl_kbd, event| {
+                        println!("Repeat: {:?} ", event);
+                    }),
+                )
+                .expect("Failed to create keyboard");
 
-        //     // self.keyboard = Some(keyboard);
-        // }
+            self.keyboard = Some(keyboard);
+        }
 
-        // if capability == Capability::Pointer && self.pointer.is_none() {
-        //     println!("Set pointer capability");
-        //     let pointer = self
-        //         .seat_state
-        //         .get_pointer(qh, &seat)
-        //         .expect("Failed to create pointer");
-        //     // self.pointer = Some(pointer);
-        // }
+        if capability == Capability::Pointer && self.pointer.is_none() {
+            println!("Set pointer capability");
+            let pointer = self
+                .globals
+                .seat_state
+                .get_pointer(qh, &seat)
+                .expect("Failed to create pointer");
+            self.pointer = Some(pointer);
+        }
     }
 
     fn remove_capability(
@@ -501,15 +515,15 @@ impl SeatHandler for WaylandClientState {
         _: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        // if capability == Capability::Keyboard && self.keyboard.is_some() {
-        //     println!("Unset keyboard capability");
-        //     self.keyboard.take().unwrap().release();
-        // }
+        if capability == Capability::Keyboard && self.keyboard.is_some() {
+            println!("Unset keyboard capability");
+            self.keyboard.take().unwrap().release();
+        }
 
-        // if capability == Capability::Pointer && self.pointer.is_some() {
-        //     println!("Unset pointer capability");
-        //     self.pointer.take().unwrap().release();
-        // }
+        if capability == Capability::Pointer && self.pointer.is_some() {
+            println!("Unset pointer capability");
+            self.pointer.take().unwrap().release();
+        }
     }
 
     fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
@@ -629,9 +643,12 @@ impl ShmHandler for WaylandClientState {
 }
 
 impl WaylandClientState {
-    pub fn draw(&mut self, _conn: &Connection, qh: &QueueHandle<Self>) {
-        // TODO
-    }
+    // pub fn draw(&mut self, _conn: &Connection, qh: &QueueHandle<Self>) {
+    //     println!("draw");
+    //     // for window in self.windows {
+    //     //     // window.draw();
+    //     // }
+    // }
 }
 
 delegate_compositor!(WaylandClientState);

@@ -1,5 +1,6 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::ffi::c_void;
+use std::num::NonZeroU32;
 use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -182,6 +183,74 @@ impl Drop for WaylandWindow {
     }
 }
 
+impl WaylandWindowStatePtr {
+    pub fn frame(&self, request_frame_callback: bool) {
+        // if request_frame_callback {
+        //     let state = self.state.borrow_mut();
+        //     state
+        //         .window
+        //         .wl_surface()
+        //         .frame(&state.globals.qh, state.surface.id());
+        //     drop(state);
+        // }
+        let mut cb = self.callbacks.borrow_mut();
+        if let Some(fun) = cb.request_frame.as_mut() {
+            fun();
+        }
+    }
+
+    pub fn set_size_and_scale(
+        &self,
+        width: Option<NonZeroU32>,
+        height: Option<NonZeroU32>,
+        scale: Option<f32>,
+    ) {
+        let (width, height, scale) = {
+            let mut state = self.state.borrow_mut();
+            if width.map_or(true, |width| width.get() == state.bounds.size.width)
+                && height.map_or(true, |height| height.get() == state.bounds.size.height)
+                && scale.map_or(true, |scale| scale == state.scale)
+            {
+                return;
+            }
+            if let Some(width) = width {
+                state.bounds.size.width = width.get();
+            }
+            if let Some(height) = height {
+                state.bounds.size.height = height.get();
+            }
+            if let Some(scale) = scale {
+                state.scale = scale;
+            }
+            let width = state.bounds.size.width;
+            let height = state.bounds.size.height;
+            let scale = state.scale;
+            state.renderer.update_drawable_size(size(
+                width as f64 * scale as f64,
+                height as f64 * scale as f64,
+            ));
+            (width, height, scale)
+        };
+
+        if let Some(ref mut fun) = self.callbacks.borrow_mut().resize {
+            fun(
+                Size {
+                    width: px(width as f32),
+                    height: px(height as f32),
+                },
+                scale,
+            );
+        }
+
+        // {
+        //     let state = self.state.borrow();
+        //     if let Some(viewport) = &state.viewport {
+        //         viewport.set_destination(width as i32, height as i32);
+        //     }
+        // }
+    }
+}
+
 impl WaylandWindow {
     fn borrow(&self) -> Ref<WaylandWindowState> {
         self.0.state.borrow()
@@ -238,8 +307,6 @@ impl PlatformWindow for WaylandWindow {
         self.borrow().maximized
     }
 
-    // todo(linux)
-    // check if it is right
     fn window_bounds(&self) -> WindowBounds {
         let state = self.borrow();
         if state.fullscreen {
@@ -395,6 +462,7 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn on_request_frame(&self, callback: Box<dyn FnMut()>) {
+        println!("on_request_frame");
         self.0.callbacks.borrow_mut().request_frame = Some(callback);
     }
 
