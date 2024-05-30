@@ -1,6 +1,7 @@
 mod dispatcher;
 mod headless;
 mod platform;
+mod text_system;
 mod wayland;
 mod x11;
 mod xdg_desktop_portal;
