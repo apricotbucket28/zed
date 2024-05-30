@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context, Result};
 use collections::HashMap;
 use font_kit::{
     canvas::{Canvas, Format, RasterizationOptions},
-    font::Font as FtFont,
+    font::Font as FontKitFont,
     handle::Handle,
     hinting::HintingOptions,
     source::SystemSource,
@@ -27,7 +27,7 @@ struct LinuxTextSystemState {
     memory_source: MemSource,
     system_source: SystemSource,
     /// Contains all already loaded fonts, including all faces. Indexed by `FontId`.
-    loaded_fonts_store: HashMap<FontId, (FtFont, Box<()>)>, // TODO: store harfbuzz font
+    loaded_fonts_store: HashMap<FontId, (FontKitFont, Box<()>)>, // TODO: store harfbuzz font
     /// Caches the `FontId`s associated with a specific family to avoid iterating the font database
     /// for every font face in a family.
     font_ids_by_family_cache: HashMap<SharedString, SmallVec<[FontId; 4]>>,
@@ -339,10 +339,6 @@ impl LinuxTextSystemState {
     ) -> crate::LineLayout {
         // println!("layout_line: {text:?}");
 
-        let buffer = harfbuzz_rs::UnicodeBuffer::new()
-            .add_str(text)
-            .guess_segment_properties();
-
         // TODO: enable features specified in load_family
         let features = vec![
             harfbuzz_rs::Feature::new(b"kern", 0, 0..),
@@ -350,66 +346,77 @@ impl LinuxTextSystemState {
             harfbuzz_rs::Feature::new(b"clig", 0, 0..),
         ];
 
-        let mut glyphs = SmallVec::new();
-        // assert!(font_runs.len() == 1);
-        if font_runs.len() != 1 {
-            log::error!("------------------ {font_runs:?}");
-            return LineLayout::default();
-        }
-        let run = font_runs.first().unwrap();
-        // TODO for run in font_runs {
-        let (font, _hb_font) = self.loaded_fonts_store.get(&run.font_id).unwrap();
-        let font_metrics = font.metrics();
-
-        // TODO: load font in load_family
-        let data = font.copy_font_data().unwrap();
-        let face = harfbuzz_rs::Face::from_bytes(&data, 0);
-        let hb_font = harfbuzz_rs::Font::new(face);
-
-        let shape_info = harfbuzz_rs::shape(&hb_font, buffer, &features);
-        if shape_info.is_empty() {
-            log::error!("------------------!!!!!!!");
-            return LineLayout::default();
-        }
-        let glyph_infos = shape_info.get_glyph_infos();
-        let glyph_positions = shape_info.get_glyph_positions();
+        let mut utf8_offset = 0;
 
         let mut x_offset = 0.;
+        let mut ascent: f32 = 0.;
+        let mut descent: f32 = 0.;
+        let mut runs = Vec::with_capacity(font_runs.len());
 
-        for (info, pos) in glyph_infos.iter().zip(glyph_positions) {
-            if info.codepoint == 0 {
-                x_offset += pos.x_advance as f32 / 64.;
-                continue; // TODO: font fallback
+        for run in font_runs {
+            let (font, _hb_font) = self.loaded_fonts_store.get(&run.font_id).unwrap();
+            let font_metrics = font.metrics();
+            ascent =
+                ascent.max(font_metrics.ascent * font_size.0 / font_metrics.units_per_em as f32);
+            descent = descent
+                .max(font_metrics.descent.abs() * font_size.0 / font_metrics.units_per_em as f32);
+
+            // TODO: load font in load_family
+            let data = font.copy_font_data().unwrap();
+            let face = harfbuzz_rs::Face::from_bytes(&data, 0);
+            let hb_font = harfbuzz_rs::Font::new(face);
+            // hb_font.get_*
+
+            let text = &text[utf8_offset..(utf8_offset + run.len)];
+            utf8_offset += run.len;
+
+            let buffer = harfbuzz_rs::UnicodeBuffer::new()
+                .add_str(text)
+                .guess_segment_properties();
+
+            let shape_info = harfbuzz_rs::shape(&hb_font, buffer, &features);
+            if shape_info.is_empty() {
+                continue;
             }
 
-            let position = point(x_offset.into(), Pixels::ZERO);
+            let glyph_infos = shape_info.get_glyph_infos();
+            let glyph_positions = shape_info.get_glyph_positions();
 
-            // TODO: cache
-            let advance = font
-                .advance(info.codepoint)
-                .expect("glyph should always be found");
-            x_offset += advance.x() * font_size.0 / font_metrics.units_per_em as f32;
+            let mut glyphs = SmallVec::with_capacity(glyph_infos.len());
+            for (info, pos) in glyph_infos.iter().zip(glyph_positions) {
+                if info.codepoint == 0 {
+                    x_offset += pos.x_advance as f32 / 64.;
+                    continue; // TODO: font fallback
+                }
 
-            glyphs.push(ShapedGlyph {
-                id: GlyphId(info.codepoint),
-                position,
-                index: info.cluster as usize,
-                is_emoji: false, // TODO
+                let position = point(x_offset.into(), Pixels::ZERO);
+
+                // TODO: cache
+                let advance = font
+                    .advance(info.codepoint)
+                    .expect("glyph should always be found");
+                x_offset += advance.x() * font_size.0 / font_metrics.units_per_em as f32;
+
+                glyphs.push(ShapedGlyph {
+                    id: GlyphId(info.codepoint),
+                    position,
+                    index: info.cluster as usize,
+                    is_emoji: false, // TODO
+                });
+            }
+
+            runs.push(ShapedRun {
+                font_id: run.font_id,
+                glyphs,
             });
         }
-
-        let ascent = font_metrics.ascent * font_size.0 / font_metrics.units_per_em as f32;
-        let descent = font_metrics.descent.abs() * font_size.0 / font_metrics.units_per_em as f32;
 
         LineLayout {
             font_size,
             width: x_offset.into(),
             ascent: ascent.into(),
             descent: descent.into(),
-            runs: vec![ShapedRun {
-                font_id: run.font_id,
-                glyphs,
-            }],
+            runs,
             len: text.len(),
         }
     }
