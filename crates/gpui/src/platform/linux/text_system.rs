@@ -196,9 +196,10 @@ impl LinuxTextSystemState {
 
             // Remove bad fonts
             let has_m_glyph = font.glyph_for_char('m').is_some();
-            let allowed_bad_font = font
-                .postscript_name()
-                .is_some_and(|n| n != "NotoColorEmoji");
+            let allowed_bad_font =
+                ["NotoColorEmoji"].contains(&font.postscript_name().unwrap().as_str());
+
+            dbg!(font.postscript_name());
 
             if !has_m_glyph && !allowed_bad_font {
                 log::warn!(
@@ -283,6 +284,12 @@ impl LinuxTextSystemState {
             rasterization_options,
         )?;
 
+        // dbg!(raster_bounds);
+
+        // const CBDT: u32 = u32::from_be_bytes(*b"CBDT");
+        // let cbdt = font.load_font_table(CBDT);
+        // dbg!(cbdt);
+
         // TODO: do we need a different format for emojis?
         let mut canvas = Canvas::new(raster_bounds.size(), Format::A8);
         font.rasterize_glyph(
@@ -355,17 +362,16 @@ impl LinuxTextSystemState {
 
         for run in font_runs {
             let (font, _hb_font) = self.loaded_fonts_store.get(&run.font_id).unwrap();
-            let font_metrics = font.metrics();
-            ascent =
-                ascent.max(font_metrics.ascent * font_size.0 / font_metrics.units_per_em as f32);
-            descent = descent
-                .max(font_metrics.descent.abs() * font_size.0 / font_metrics.units_per_em as f32);
-
             // TODO: load font in load_family
             let data = font.copy_font_data().unwrap();
             let face = harfbuzz_rs::Face::from_bytes(&data, 0);
             let hb_font = harfbuzz_rs::Font::new(face);
-            // hb_font.get_*
+
+            let units_per_em = hb_font.face().upem() as f32;
+            let font_extents = hb_font.get_font_h_extents().expect("no font extents info");
+
+            ascent = ascent.max(font_extents.ascender as f32 * font_size.0 / units_per_em);
+            descent = descent.max(font_extents.descender.abs() as f32 * font_size.0 / units_per_em);
 
             let text = &text[utf8_offset..(utf8_offset + run.len)];
             utf8_offset += run.len;
@@ -373,6 +379,10 @@ impl LinuxTextSystemState {
             let buffer = harfbuzz_rs::UnicodeBuffer::new()
                 .add_str(text)
                 .guess_segment_properties();
+
+            // dbg!(buffer.get_script());
+            // dbg!(buffer.get_language());
+            // dbg!(buffer.get_direction());
 
             let shape_info = harfbuzz_rs::shape(&hb_font, buffer, &features);
             if shape_info.is_empty() {
@@ -391,11 +401,8 @@ impl LinuxTextSystemState {
 
                 let position = point(x_offset.into(), Pixels::ZERO);
 
-                // TODO: cache
-                let advance = font
-                    .advance(info.codepoint)
-                    .expect("glyph should always be found");
-                x_offset += advance.x() * font_size.0 / font_metrics.units_per_em as f32;
+                let advance = hb_font.get_glyph_h_advance(info.codepoint);
+                x_offset += advance as f32 * font_size.0 / units_per_em;
 
                 glyphs.push(ShapedGlyph {
                     id: GlyphId(info.codepoint),
@@ -411,14 +418,16 @@ impl LinuxTextSystemState {
             });
         }
 
-        LineLayout {
+        let l = LineLayout {
             font_size,
             width: x_offset.into(),
             ascent: ascent.into(),
             descent: descent.into(),
             runs,
             len: text.len(),
-        }
+        };
+        dbg!(&l);
+        l
     }
 }
 
