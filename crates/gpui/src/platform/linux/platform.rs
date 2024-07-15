@@ -262,15 +262,15 @@ impl<P: LinuxClient + 'static> Platform for P {
             .spawn(async move {
                 let title = if options.multiple {
                     if options.directories {
-                        "Open folders"
+                        "Open Folders"
                     } else {
-                        "Open files"
+                        "Open Files"
                     }
                 } else {
                     if options.directories {
-                        "Open folder"
+                        "Open Folder"
                     } else {
-                        "Open file"
+                        "Open File"
                     }
                 };
 
@@ -304,7 +304,7 @@ impl<P: LinuxClient + 'static> Platform for P {
             .spawn(async move {
                 let request = SaveFileRequest::default()
                     .modal(true)
-                    .title("Select new path")
+                    .title("Save File")
                     .current_folder(directory);
 
                 let result = if let Ok(request) = request {
