@@ -277,7 +277,6 @@ impl<P: LinuxClient + 'static> Platform for P {
                 let result = OpenFileRequest::default()
                     .modal(true)
                     .title(title)
-                    .accept_label("Select")
                     .multiple(options.multiple)
                     .directory(options.directories)
                     .send()
@@ -306,7 +305,6 @@ impl<P: LinuxClient + 'static> Platform for P {
                 let request = SaveFileRequest::default()
                     .modal(true)
                     .title("Select new path")
-                    .accept_label("Accept")
                     .current_folder(directory);
 
                 let result = if let Ok(request) = request {
