@@ -56,6 +56,8 @@ use wayland_protocols::xdg::activation::v1::client::{xdg_activation_token_v1, xd
 use wayland_protocols::xdg::decoration::zv1::client::{
     zxdg_decoration_manager_v1, zxdg_toplevel_decoration_v1,
 };
+use wayland_protocols::xdg::foreign::zv2::client::zxdg_exported_v2::ZxdgExportedV2;
+use wayland_protocols::xdg::foreign::zv2::client::{zxdg_exported_v2, zxdg_exporter_v2};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_plasma::blur::client::{org_kde_kwin_blur, org_kde_kwin_blur_manager};
 use xkbcommon::xkb::ffi::XKB_KEYMAP_FORMAT_TEXT_V1;
@@ -101,6 +103,7 @@ pub struct Globals {
     pub primary_selection_manager:
         Option<zwp_primary_selection_device_manager_v1::ZwpPrimarySelectionDeviceManagerV1>,
     pub wm_base: xdg_wm_base::XdgWmBase,
+    pub exporter: Option<zxdg_exporter_v2::ZxdgExporterV2>,
     pub shm: wl_shm::WlShm,
     pub seat: wl_seat::WlSeat,
     pub viewporter: Option<wp_viewporter::WpViewporter>,
@@ -141,6 +144,7 @@ impl Globals {
             shm: globals.bind(&qh, 1..=1, ()).unwrap(),
             seat,
             wm_base: globals.bind(&qh, 2..=5, ()).unwrap(),
+            exporter: globals.bind(&qh, 1..=1, ()).ok(),
             viewporter: globals.bind(&qh, 1..=1, ()).ok(),
             fractional_scale_manager: globals.bind(&qh, 1..=1, ()).ok(),
             decoration_manager: globals.bind(&qh, 1..=1, ()).ok(),
@@ -222,6 +226,8 @@ pub(crate) struct WaylandClientState {
     data_offers: Vec<DataOffer<WlDataOffer>>,
     primary_data_offer: Option<DataOffer<ZwpPrimarySelectionOfferV1>>,
     cursor: Cursor,
+    // Export handle to surface mapping
+    xdg_exports: HashMap<ObjectId, ObjectId>,
     pending_activation: Option<PendingActivation>,
     event_loop: Option<EventLoop<'static, WaylandClientStatePtr>>,
     common: LinuxCommon,
@@ -274,6 +280,15 @@ impl WaylandClientStatePtr {
     pub fn set_pending_activation(&self, window: ObjectId) {
         self.0.upgrade().unwrap().borrow_mut().pending_activation =
             Some(PendingActivation::Window(window));
+    }
+
+    pub fn add_xdg_export(&self, surface_id: ObjectId, export: ZxdgExportedV2) {
+        self.0
+            .upgrade()
+            .unwrap()
+            .borrow_mut()
+            .xdg_exports
+            .insert(export.id(), surface_id);
     }
 
     pub fn enable_ime(&self) {
@@ -546,6 +561,7 @@ impl WaylandClient {
             data_offers: Vec::new(),
             primary_data_offer: None,
             cursor,
+            xdg_exports: HashMap::default(),
             pending_activation: None,
             event_loop: Some(event_loop),
         }));
@@ -599,15 +615,20 @@ impl LinuxClient for WaylandClient {
         handle: AnyWindowHandle,
         params: WindowParams,
     ) -> anyhow::Result<Box<dyn PlatformWindow>> {
-        let mut state = self.0.borrow_mut();
+        let state = self.0.borrow();
+        let globals = state.globals.clone();
+        let appearance = state.common.appearance;
+        drop(state);
 
         let (window, surface_id) = WaylandWindow::new(
             handle,
-            state.globals.clone(),
+            globals,
             WaylandClientStatePtr(Rc::downgrade(&self.0)),
             params,
-            state.common.appearance,
+            appearance,
         )?;
+
+        let mut state = self.0.borrow_mut();
         state.windows.insert(surface_id, window.0.clone());
 
         Ok(Box::new(window))
@@ -748,6 +769,14 @@ impl LinuxClient for WaylandClient {
             .map(|window| window.handle())
     }
 
+    fn active_window_identifier(&self) -> Option<ashpd::WindowIdentifier> {
+        self.0
+            .borrow()
+            .keyboard_focused_window
+            .as_ref()?
+            .identifier()
+    }
+
     fn compositor_name(&self) -> &'static str {
         "Wayland"
     }
@@ -814,6 +843,7 @@ delegate_noop!(WaylandClientStatePtr: ignore wp_cursor_shape_device_v1::WpCursor
 delegate_noop!(WaylandClientStatePtr: ignore wp_cursor_shape_manager_v1::WpCursorShapeManagerV1);
 delegate_noop!(WaylandClientStatePtr: ignore wl_data_device_manager::WlDataDeviceManager);
 delegate_noop!(WaylandClientStatePtr: ignore zwp_primary_selection_device_manager_v1::ZwpPrimarySelectionDeviceManagerV1);
+delegate_noop!(WaylandClientStatePtr: ignore zxdg_exporter_v2::ZxdgExporterV2);
 delegate_noop!(WaylandClientStatePtr: ignore wl_shm::WlShm);
 delegate_noop!(WaylandClientStatePtr: ignore wl_shm_pool::WlShmPool);
 delegate_noop!(WaylandClientStatePtr: ignore wl_buffer::WlBuffer);
@@ -974,6 +1004,33 @@ impl Dispatch<xdg_wm_base::XdgWmBase, ()> for WaylandClientStatePtr {
     ) {
         if let xdg_wm_base::Event::Ping { serial } = event {
             wm_base.pong(serial);
+        }
+    }
+}
+
+impl Dispatch<zxdg_exported_v2::ZxdgExportedV2, ()> for WaylandClientStatePtr {
+    fn event(
+        this: &mut Self,
+        exported: &zxdg_exported_v2::ZxdgExportedV2,
+        event: <zxdg_exported_v2::ZxdgExportedV2 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        let client = this.get_client();
+        let mut state = client.borrow_mut();
+
+        dbg!(&event);
+        if let zxdg_exported_v2::Event::Handle { handle } = event {
+            dbg!(&handle);
+            let Some(surface_id) = state.xdg_exports.remove(&exported.id()) else {
+                eprintln!("RETURN");
+                return;
+            };
+            let Some(window) = get_window(&mut state, &surface_id) else {
+                return;
+            };
+            window.set_xdg_handle(handle);
         }
     }
 }

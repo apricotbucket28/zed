@@ -4,6 +4,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use ashpd::WindowIdentifier;
 use blade_graphics as gpu;
 use collections::HashMap;
 use futures::channel::oneshot::Receiver;
@@ -96,6 +97,7 @@ pub struct WaylandWindowState {
     tiling: Tiling,
     window_bounds: Bounds<Pixels>,
     client: WaylandClientStatePtr,
+    xdg_handle: Option<String>,
     handle: AnyWindowHandle,
     active: bool,
     hovered: bool,
@@ -156,6 +158,11 @@ impl WaylandWindowState {
             transparent: true,
         };
 
+        if let Some(exporter) = &globals.exporter {
+            let exported = exporter.export_toplevel(&surface, &globals.qh, ());
+            client.add_xdg_export(surface.id(), exported);
+        }
+
         Ok(Self {
             xdg_surface,
             acknowledged_first_configure: false,
@@ -181,6 +188,7 @@ impl WaylandWindowState {
             in_progress_configure: None,
             client,
             appearance,
+            xdg_handle: None,
             handle,
             active: false,
             hovered: false,
@@ -310,6 +318,21 @@ impl WaylandWindowStatePtr {
     pub fn handle(&self) -> AnyWindowHandle {
         self.state.borrow().handle
     }
+
+    pub fn identifier(&self) -> Option<ashpd::WindowIdentifier> {
+        Some(WindowIdentifier::from_wayland_handle(
+            self.state.borrow().xdg_handle.clone()?,
+        ))
+    }
+
+    pub fn set_xdg_handle(&self, handle: String) {
+        self.state.borrow_mut().xdg_handle = Some(handle);
+    }
+
+    // pub async fn identifier(&self) -> ashpd::WindowIdentifier {
+    //     let state = self.state.borrow();
+    //     WindowIdentifier::from_wayland(&state.surface).await
+    // }
 
     pub fn surface(&self) -> wl_surface::WlSurface {
         self.state.borrow().surface.clone()

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
+use ashpd::WindowIdentifier;
 use calloop::generic::{FdWrapper, Generic};
 use calloop::{EventLoop, LoopHandle, RegistrationToken};
 
@@ -1324,6 +1325,14 @@ impl LinuxClient for X11Client {
                 .get(&focused_window)
                 .map(|window| window.handle())
         })
+    }
+
+    fn active_window_identifier(&self) -> Option<ashpd::WindowIdentifier> {
+        let state = self.0.borrow();
+        dbg!(state.keyboard_focused_window);
+        Some(WindowIdentifier::from_xid(
+            state.keyboard_focused_window?.into(),
+        ))
     }
 }
 

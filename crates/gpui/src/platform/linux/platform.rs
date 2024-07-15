@@ -21,7 +21,7 @@ use std::{
 use anyhow::anyhow;
 use ashpd::desktop::file_chooser::{OpenFileRequest, SaveFileRequest};
 use ashpd::desktop::open_uri::{OpenDirectoryRequest, OpenFileRequest as OpenUriRequest};
-use ashpd::{url, ActivationToken};
+use ashpd::{url, ActivationToken, WindowIdentifier};
 use async_task::Runnable;
 use calloop::channel::Channel;
 use calloop::{EventLoop, LoopHandle, LoopSignal};
@@ -74,6 +74,7 @@ pub trait LinuxClient {
     fn read_from_primary(&self) -> Option<ClipboardItem>;
     fn read_from_clipboard(&self) -> Option<ClipboardItem>;
     fn active_window(&self) -> Option<AnyWindowHandle>;
+    fn active_window_identifier(&self) -> Option<WindowIdentifier>;
     fn run(&self);
 }
 
@@ -258,6 +259,8 @@ impl<P: LinuxClient + 'static> Platform for P {
         options: PathPromptOptions,
     ) -> oneshot::Receiver<Option<Vec<PathBuf>>> {
         let (done_tx, done_rx) = oneshot::channel();
+        let identifier = self.active_window_identifier();
+        dbg!(&identifier);
         self.foreground_executor()
             .spawn(async move {
                 let title = if options.directories {
@@ -267,6 +270,7 @@ impl<P: LinuxClient + 'static> Platform for P {
                 };
 
                 let result = OpenFileRequest::default()
+                    .identifier(identifier)
                     .modal(true)
                     .title(title)
                     .multiple(options.multiple)
@@ -291,10 +295,12 @@ impl<P: LinuxClient + 'static> Platform for P {
 
     fn prompt_for_new_path(&self, directory: &Path) -> oneshot::Receiver<Option<PathBuf>> {
         let (done_tx, done_rx) = oneshot::channel();
+        let identifier = self.active_window_identifier();
         let directory = directory.to_owned();
         self.foreground_executor()
             .spawn(async move {
                 let request = SaveFileRequest::default()
+                    .identifier(identifier)
                     .modal(true)
                     .title("Save File")
                     .current_folder(directory);
@@ -318,7 +324,6 @@ impl<P: LinuxClient + 'static> Platform for P {
                 done_tx.send(result);
             })
             .detach();
-
         done_rx
     }
 

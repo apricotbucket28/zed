@@ -63,6 +63,10 @@ impl LinuxClient for HeadlessClient {
         None
     }
 
+    fn active_window_identifier(&self) -> Option<ashpd::WindowIdentifier> {
+        None
+    }
+
     fn open_window(
         &self,
         _handle: AnyWindowHandle,
