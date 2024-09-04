@@ -858,8 +858,6 @@ impl X11Client {
                         click_count: current_count,
                         first_mouse: false,
                     }));
-                } else {
-                    log::warn!("Unknown button press: {event:?}");
                 }
             }
             Event::XinputButtonRelease(event) => {
